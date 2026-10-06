@@ -1,8 +1,10 @@
 'use strict';
 // Menus, keyboard input and the main loop.
 
-const canvas = document.getElementById('game');
+const canvas = document.getElementById('hud');   // 2D overlay: HUD, menus, text
 const ctx = canvas.getContext('2d');
+const view = new Scene3D(document.getElementById('scene'));
+const portraits = makePortraits(CHARACTERS);
 
 const KEYMAPS = [
   { left: 'KeyA', right: 'KeyD', jump: 'KeyW', guard: 'KeyS', light: 'KeyF', heavy: 'KeyG', special: 'KeyH', dash: 'KeyR', bankai: 'KeyT' },
@@ -170,13 +172,15 @@ function render() {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   if (canvas.width !== W * dpr) { canvas.width = W * dpr; canvas.height = H * dpr; }
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, W, H);
   const s = state;
   if (s.screen === 'title' || s.screen === 'howto') drawTitle();
   else if (s.screen === 'select') drawSelect();
   else {
-    drawWorld(ctx, s.world);
-    drawHud(ctx, s.world, s.controllers.map(c => c.mind !== undefined ? c.mind : null));
-    drawRelease(ctx, s.world);
+    view.renderFight(s.world);
+    drawWorldOverlay(ctx, s.world, (x, y) => view.project(x, y));
+    drawHud(ctx, s.world, s.controllers.map(c => c.mind !== undefined ? c.mind : null), s.mode);
+    drawReleaseText(ctx, s.world);
     drawBanner(ctx, s.world);
     if (s.world.phase === 'intro') text(ctx, s.mode === 'cpu' ? 'P1  ' + KEY_LABELS[0] + '   ·   Esc pause' : 'P1  ' + KEY_LABELS[0] + '      P2  ' + KEY_LABELS[1], W / 2, H - 18, 15, '#d8d2e4', 'center', FONT_UI, 600);
     if (s.screen === 'pause') drawMenuOverlay('PAUSED', PAUSE_ITEMS, true);
@@ -198,24 +202,9 @@ function frame(now) {
 
 // ------------------------------------------------------------------ screens
 
-function wrapText(str, x, y, maxW, lineH, size, color, weight = 500) {
-  ctx.font = `${weight} ${size}px ${FONT_UI}`;
-  let lineStr = '';
-  for (const word of str.split(' ')) {
-    const test = lineStr ? lineStr + ' ' + word : word;
-    if (ctx.measureText(test).width > maxW && lineStr) {
-      text(ctx, lineStr, x, y, size, color, 'left', FONT_UI, weight);
-      lineStr = word;
-      y += lineH;
-    } else lineStr = test;
-  }
-  if (lineStr) text(ctx, lineStr, x, y, size, color, 'left', FONT_UI, weight);
-  return y;
-}
-
 function drawTitle() {
-  drawBackdrop(ctx);
-  ctx.fillStyle = 'rgba(6,6,14,0.55)'; ctx.fillRect(0, 0, W, H);
+  view.renderMenu(state.t);
+  ctx.fillStyle = 'rgba(6,6,14,0.45)'; ctx.fillRect(0, 0, W, H);
   // A drifting veil of petals behind the logo
   for (let i = 0; i < 50; i++) {
     const x = (i * 211 + state.t * (0.6 + (i % 4) * 0.3)) % (W + 40) - 20, y = (i * 97 + state.t * 0.4) % H;
@@ -234,18 +223,18 @@ function drawTitle() {
 }
 
 function drawHowTo() {
-  ctx.fillStyle = 'rgba(8,8,14,0.85)'; roundRect(ctx, 150, 320, W - 300, 360, 10); ctx.fill();
+  ctx.fillStyle = 'rgba(8,8,14,0.88)'; roundRect(ctx, 130, 300, W - 260, 400, 10); ctx.fill();
   const lines = [
     ['Player 1', KEY_LABELS[0]],
     ['Player 2', KEY_LABELS[1]],
-    ['Bankai', 'Your reiatsu gauge fills as you fight. When it flashes BANKAI READY, release your bankai.'],
-    ['Effects', 'Bankai rarely add raw power. They change how the opponent can play: their footing, senses, inputs or options.'],
+    ['Bankai', 'Your reiatsu gauge fills as you fight. When it flashes BANKAI READY, release your bankai. It changes how the opponent can fight, and its damage matches its strength.'],
+    ['Abilities', 'In bankai the special key does four things: on its own, toward the opponent, away from them, or while guarding. Each has its own cooldown.'],
+    ['Escapes', 'Each hit in a row stuns for less. Dash while being hit to burst free (25 reiatsu). Trapped? Mash attack buttons.'],
     ['Spirit orbs', 'Each fighter has two. Empty the health bar to shatter one; shatter both to win.'],
-    ['Escapes', 'Trapped? Mash attack buttons. Watch ground markings for incoming strikes.'],
   ];
   lines.forEach(([k, v], i) => {
-    text(ctx, k.toUpperCase(), 190, 366 + i * 52, 18, GOLD);
-    wrapText(v, 330, 366 + i * 52, W - 520, 22, 19, PAPER);
+    text(ctx, k.toUpperCase(), 170, 344 + i * 58, 18, GOLD);
+    wrapText(ctx, v, 300, 344 + i * 58, W - 460, 22, 18, PAPER);
   });
   text(ctx, 'Enter or Esc to go back', W / 2, H - 20, 16, '#8d88a0', 'center', FONT_UI, 600);
 }
@@ -253,10 +242,7 @@ function drawHowTo() {
 function drawCard(i, x, y, w, h) {
   const def = CHARACTERS[i];
   ctx.fillStyle = '#16141f'; ctx.fillRect(x, y, w, h);
-  ctx.save();
-  ctx.beginPath(); ctx.rect(x, y, w, h); ctx.clip();
-  drawFighter(ctx, { def, x: x + w / 2 - 6, y: y + h + 70, h: 170 * (def.height || 120) / 120, facing: 1, state: 'idle', animT: 0, onGround: true, reiatsu: 0, fx: {} });
-  ctx.restore();
+  ctx.drawImage(portraits[def.id], x + (w - h) / 2, y, h, h);
   ctx.fillStyle = 'rgba(8,8,14,0.8)'; ctx.fillRect(x, y + h - 22, w, 22);
   const short = SHORT_NAMES[def.id] || def.name.split(' ')[0];
   text(ctx, short.toUpperCase(), x + w / 2, y + h - 6, 15, PAPER, 'center');
@@ -264,13 +250,17 @@ function drawCard(i, x, y, w, h) {
 
 function drawSelect() {
   const s = state;
-  drawBackdrop(ctx);
-  ctx.fillStyle = 'rgba(6,6,14,0.7)'; ctx.fillRect(0, 0, W, H);
+  const active = s.mode === 'cpu' ? [0, s.locked[0] ? 1 : -1] : [0, 1];
+  // The preview alternates between shikai and bankai so you can see what changes.
+  const showBankai = Math.floor(state.t / 150) % 2 === 1;
+  view.renderMenu(state.t, [0, 1].map(p => (active[p] >= 0 || s.locked[p])
+    ? { slot: p, def: CHARACTERS[s.cursor[p]], bankai: showBankai, sx: (p === 0 ? 30 : W / 2 + 10) + 110, sy: 316 + 380 - 34, facing: 1 }
+    : null));
+  ctx.fillStyle = 'rgba(6,6,14,0.78)'; ctx.fillRect(0, 0, W, 312);
   const title = s.mode === 'cpu' ? (s.locked[0] ? 'CHOOSE THE CPU\'S FIGHTER' : 'CHOOSE YOUR FIGHTER') : 'CHOOSE YOUR FIGHTERS';
   text(ctx, title, W / 2, 46, 34, PAPER, 'center');
   const cw = 100, ch = 112, gap = 6, gx = (W - (GRID_COLS * (cw + gap) - gap)) / 2, gy = 68;
   CHARACTERS.forEach((_, i) => drawCard(i, gx + (i % GRID_COLS) * (cw + gap), gy + Math.floor(i / GRID_COLS) * (ch + gap), cw, ch));
-  const active = s.mode === 'cpu' ? [0, s.locked[0] ? 1 : -1] : [0, 1];
   for (const p of [0, 1]) {
     if (active[p] < 0 && !s.locked[p]) continue;
     const i = s.cursor[p], x = gx + (i % GRID_COLS) * (cw + gap), y = gy + Math.floor(i / GRID_COLS) * (ch + gap);
@@ -278,34 +268,42 @@ function drawSelect() {
     ctx.strokeRect(x + p * 3, y + p * 3, cw - p * 6, ch - p * 6);
     text(ctx, s.mode === 'cpu' && p === 1 ? 'CPU' : 'P' + (p + 1), x + 6 + p * 56, y + 18, 15, SIDE_COLORS[p]);
   }
-  for (const p of [0, 1]) drawInfoPanel(p, s.cursor[p], p === 0 ? 30 : W / 2 + 10, 316, W / 2 - 40, 380, active[p] >= 0 || s.locked[p]);
+  for (const p of [0, 1]) drawInfoPanel(p, s.cursor[p], p === 0 ? 30 : W / 2 + 10, 316, W / 2 - 40, 380, active[p] >= 0 || s.locked[p], showBankai);
+  ctx.fillStyle = 'rgba(6,6,14,0.78)'; ctx.fillRect(0, 696, W, H - 696); ctx.fillRect(0, 312, 30, 384); ctx.fillRect(W / 2 - 10, 312, 20, 384); ctx.fillRect(W - 30, 312, 30, 384);
   const hint = s.mode === 'cpu'
     ? 'Arrows or WASD to move · Enter or F to pick · G to change your pick · Esc back'
     : 'P1: WASD + F to pick (G undo) · P2: arrows + , to pick (. undo) · Esc back';
   text(ctx, hint, W / 2, H - 12, 16, '#8d88a0', 'center', FONT_UI, 600);
 }
 
-function drawInfoPanel(p, i, x, y, w, h, shown) {
-  ctx.fillStyle = 'rgba(14,12,22,0.88)'; roundRect(ctx, x, y, w, h, 10); ctx.fill();
+function drawInfoPanel(p, i, x, y, w, h, shown, showBankai) {
+  ctx.fillStyle = 'rgba(14,12,22,0.9)';
+  // The left of the panel is a window onto the 3D model.
+  ctx.fillRect(x + 220, y, w - 220, h);
+  if (!shown) ctx.fillRect(x, y, 220, h);
+  ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1; ctx.strokeRect(x + 0.5, y + 0.5, w - 1, h - 1);
   ctx.fillStyle = SIDE_COLORS[p]; ctx.fillRect(x, y + 14, 4, 40);
   if (!shown) { text(ctx, 'Waiting for player 1', x + w / 2, y + h / 2, 22, '#6f6a80', 'center'); return; }
   const def = CHARACTERS[i];
-  // The preview alternates between shikai and bankai so you can see what changes.
-  const showBankai = Math.floor(state.t / 150) % 2 === 1;
-  ctx.save();
-  ctx.beginPath(); roundRect(ctx, x, y, w, h, 10); ctx.clip();
-  drawFighter(ctx, { def, x: x + 110, y: y + h - 26, h: 1.6 * (def.height || 120), facing: 1, state: 'idle', animT: state.t, onGround: true, bankai: showBankai, reiatsu: 100, crest: 60, fx: {} });
-  ctx.restore();
-  text(ctx, showBankai ? 'BANKAI' : 'SHIKAI', x + 110, y + h - 6, 13, showBankai ? GOLD : '#9a94ab', 'center');
+  ctx.fillStyle = 'rgba(8,8,14,0.75)'; ctx.fillRect(x, y + h - 24, 220, 24);
+  text(ctx, showBankai ? 'BANKAI' : 'SHIKAI', x + 110, y + h - 7, 13, showBankai ? GOLD : '#9a94ab', 'center');
   const tx = x + 230, tw = w - 250;
   const owner = state.mode === 'cpu' && p === 1 ? 'CPU' : 'P' + (p + 1);
-  text(ctx, owner + (state.locked[p] ? ' · LOCKED IN' : ''), tx, y + 34, 15, SIDE_COLORS[p]);
-  text(ctx, def.name.toUpperCase(), tx, y + 70, 34, PAPER);
-  text(ctx, 'SHIKAI', tx, y + 102, 13, '#9a94ab');
-  text(ctx, def.shikai, tx + 56, y + 102, 17, PAPER, 'left', FONT_UI, 600);
-  text(ctx, 'BANKAI', tx, y + 128, 13, GOLD);
-  wrapText(def.bankaiName, tx + 56, y + 128, tw - 56, 20, 17, GOLD, 600);
-  wrapText(def.blurb, tx, y + 172, tw, 24, 18, '#e2dcea');
+  text(ctx, owner + (state.locked[p] ? ' · LOCKED IN' : ''), tx, y + 28, 13, SIDE_COLORS[p]);
+  text(ctx, def.name.toUpperCase(), tx, y + 58, 30, PAPER);
+  text(ctx, 'SHIKAI', tx, y + 82, 12, '#9a94ab');
+  text(ctx, def.shikai, tx + 50, y + 82, 15, PAPER, 'left', FONT_UI, 600);
+  text(ctx, 'BANKAI', tx, y + 102, 12, GOLD);
+  const by = wrapText(ctx, def.bankaiName, tx + 50, y + 102, tw - 50, 18, 15, GOLD, 600);
+  const ay = wrapText(ctx, def.blurb, tx, by + 22, tw, 17, 14, '#e2dcea');
+  text(ctx, 'BANKAI ABILITIES', tx, ay + 24, 11, GOLD);
+  def.abilities.forEach((a, k) => {
+    const cx = tx + (k % 2) * (tw / 2), cy = ay + 42 + Math.floor(k / 2) * 18;
+    text(ctx, SLOT_KEYS[0][a.slot], cx, cy, 12, '#9a94ab');
+    ctx.save(); ctx.beginPath(); ctx.rect(cx + 30, cy - 14, tw / 2 - 34, 18); ctx.clip();
+    text(ctx, a.name, cx + 30, cy, 13, PAPER, 'left', FONT_UI, 600);
+    ctx.restore();
+  });
 }
 
 function drawMenuOverlay(title, items, showControls, sub) {

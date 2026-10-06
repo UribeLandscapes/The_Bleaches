@@ -12,18 +12,26 @@
   :root { --ink: #0c0b14; color-scheme: dark; }
   html, body { height: 100%; margin: 0; }
   body { background: var(--ink); display: grid; place-items: center; overflow: hidden; padding-inline: 16px; box-sizing: border-box; }
-  canvas { display: block; width: min(100%, calc(100vh * 16 / 9)); max-width: 100%; aspect-ratio: 16 / 9; background: var(--ink); outline: none; }
+  .stage { position: relative; width: min(100%, calc(100vh * 16 / 9)); max-width: 100%; aspect-ratio: 16 / 9; }
+  .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; outline: none; }
+  #scene { background: var(--ink); }
 </style>
 </head>
 <body>
-<canvas id="game" width="1280" height="720" tabindex="0" aria-label="The Bleaches: a 2D fighting game played with the keyboard"></canvas>
+<div class="stage">
+  <canvas id="scene" width="1280" height="720" aria-hidden="true"></canvas>
+  <canvas id="hud" width="1280" height="720" tabindex="0" aria-label="The Bleaches: a 3D fighting game played with the keyboard"></canvas>
+</div>
+<script src="vendor/three.min.js"></script>
 <script src="js/core.js"></script>
 <script src="js/status.js"></script>
 <script src="js/fighter.js"></script>
 <script src="js/characters.js"></script>
 <script src="js/world.js"></script>
 <script src="js/ai.js"></script>
-<script src="js/render.js"></script>
+<script src="js/look.js"></script>
+<script src="js/scene3d.js"></script>
+<script src="js/hud.js"></script>
 <script src="js/main.js"></script>
 </body>
 </html>

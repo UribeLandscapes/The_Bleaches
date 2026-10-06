@@ -39,10 +39,13 @@ fs.mkdirSync(outDir, { recursive: true });
   for (let i = 0; i < 4; i++) { await page.keyboard.press('KeyF'); await page.waitForTimeout(80); }
   await shot('03-fight');
 
-  // Release P1's bankai with T and catch the cinematic.
+  // Release P1's bankai with T (retrying until P1 is free to act) and catch the cinematic.
   await page.evaluate(() => { window.game.world.fighters[0].reiatsu = 100; });
-  await page.keyboard.press('KeyT');
-  await page.waitForTimeout(250);
+  for (let i = 0; i < 20 && !(await page.evaluate(() => !!window.game.world.release)); i++) {
+    await page.keyboard.press('KeyT');
+    await page.waitForTimeout(60);
+  }
+  await page.waitForTimeout(400);
   await shot('04-release');
 
   // Every character: a CPU-vs-CPU fight with P1's bankai forced on.
