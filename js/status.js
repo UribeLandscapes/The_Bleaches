@@ -19,7 +19,9 @@ function freshStatus() {
     homonka: 0,                                           // Suzumebachi
     sealed: { special: 0, dash: 0, jump: 0, heavy: 0, light: 0 }, // Benihime Aratame
     erased: { special: false, dash: false, jump: false }, // Shirafude Ichimonji
-    renamed: false,
+    renamed: false, renamedT: 0,
+    disease: 0, drowning: 0,                              // Karamatsu Shinju acts two and three
+    reversed: 0, selfCut: 0,                              // Sakanade: front and back swap, swings cut yourself
     onIce: false,
   };
 }
@@ -66,6 +68,7 @@ function speedMul(s) {
   let m = 1 - 0.5 * (s.frost / 100);
   if (legsDead(s)) m *= 0.5;
   if (s.lacerated > 0) m *= 0.55;
+  if (s.drowning > 0) m *= 0.7;
   return m;
 }
 
@@ -73,7 +76,7 @@ function speedMul(s) {
 function timeScale(s) { return 1 - 0.45 * (s.frost / 100); }
 
 const TIMED = ['frozen', 'frostImmune', 'paralyzed', 'paraImmune', 'numbLegs', 'numbArms', 'outpaced', 'lacerated',
-  'inverted', 'blind', 'dazed', 'bleed', 'fragment', 'homonka'];
+  'inverted', 'blind', 'dazed', 'bleed', 'fragment', 'homonka', 'renamedT', 'disease', 'drowning', 'reversed', 'selfCut'];
 
 function tickStatus(s) {
   for (const k of TIMED) if (s[k] > 0) s[k]--;
@@ -93,6 +96,7 @@ function addFrost(world, f, amount) {
     s.frozen = 100;
     s.frostImmune = 100 + 150;
     f.interrupt();
+    world.damage(world.opponentOf(f), f, 50);
     world.say(f, 'FROZEN SOLID', '#aef');
   }
 }
@@ -119,6 +123,12 @@ function addBleed(f, stacks) {
   const s = f.fx;
   s.bleedStacks = Math.min(3, s.bleedStacks + stacks);
   s.bleed = 300;
+}
+
+// Damage over time from bankai abilities: cold, nerve poison, disease, bleeding.
+function statusDamage(f) {
+  const s = f.fx;
+  return bleedRate(f) + s.frost * 0.0025 + s.toxin * 0.004 + (s.disease > 0 ? 0.3 : 0);
 }
 
 // Bleeding gets worse the harder the victim exerts themselves.

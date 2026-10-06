@@ -44,6 +44,13 @@ class CpuController {
       this.note('Struggling free');
       return it;
     }
+    // Caught in a long combo: spend reiatsu to burst free.
+    if ((f.state === 'hitstun' || f.state === 'guardbreak') && f.combo >= 3 && f.cd.burst <= 0 && f.reiatsu >= BURST_COST && w.rng() < 0.08) {
+      const it = emptyIntent();
+      it.dash = true;
+      this.shout('Burst free!', 30);
+      return it;
+    }
     if (w.frame >= this.nextThink) {
       this.think();
       this.nextThink = w.frame + Math.round(CPU_REACT / timeScale(s)); // frost slows its thinking too
@@ -93,9 +100,18 @@ class CpuController {
         this.lock = e.ref;
         this.shout('Got you-?!', 30);
       }
+      // Clones and decoys look exactly like the real thing.
+      if (e.type === 'clone' && e.owner !== f && w.rng() < 0.6) {
+        this.lock = e.ref;
+        this.shout('There you are!', 30);
+      }
+      if (e.type === 'decoyBroken' && e.ref === this.lock) {
+        this.lock = null;
+        this.shout('It was a fake!', 40);
+      }
       if ((e.type === 'noise' || e.type === 'hit') && e.src === opp) this.heard = opp.x + (w.rng() - 0.5) * 120;
     }
-    if (this.lock && this.lock.life <= 0) {
+    if (this.lock && (this.lock.life <= 0 || this.lock.dead)) {
       this.lock = null;
       this.shout('Where did he go?', 30);
     }
@@ -144,9 +160,10 @@ class CpuController {
     if (b && L.guardUseless) a.noGuard = true;
     if (b && L.armored) a.evade = true;
     if (b && L.meleeBurns) a.noMelee = true;
-    if (b && L.attackHurts && this.score(f) <= this.score(opp)) a.noAttack = true; // trading wounds only pays when ahead
+    if (a.mirror && L.attackHurts && this.score(f) <= this.score(opp)) a.noAttack = true; // trading wounds only pays when ahead
     if (b && L.skyStrikes) a.noJump = true;
     if (f.fx.bleed > 0) a.lowExertion = true;
+    if (opp.finalBlade > 0) a.noMelee = true; // the original blade is out: stay away from it
     return a;
   }
 
@@ -246,6 +263,10 @@ class CpuController {
       if (dist < 320) return this.set('retreat', "Don't feed that crest", { dir: this.away(p.x) });
       return this.set('still', 'Waiting out his bankai', { guard: p.attacking && can('guard') });
     }
+    if (a.holdOff) {
+      if (p.attacking && dist < 170 && can('guard')) return this.set('guard', a.holdOff, { until: w.frame + 18 });
+      return this.set('still', a.holdOff, {});
+    }
     if (a.noAttack) {
       if (p.attacking && dist < 170 && can('guard')) return this.set('guard', 'Enduring', { until: w.frame + 18 });
       return this.set(dist < 220 ? 'retreat' : 'still', 'Hitting him hurts me too', { dir: this.away(p.x) });
@@ -260,10 +281,16 @@ class CpuController {
       if (can('guard') && rng() < 0.55) return this.set('guard', 'Guarding', { until: w.frame + 18 });
     }
 
-    // 5. Special.
-    if (f.cd.special <= 0 && can('special') && !p.blind) {
-      const call = f.def.aiSpecial(f, opp, dist, this, w);
-      if (call) return this.set('special', call);
+    // 5. Special, or one of the bankai's abilities.
+    if (can('special') && !p.blind) {
+      if (f.bankai) {
+        for (const ab of f.def.abilities) {
+          if (!(f.cd['ab_' + ab.slot] > 0) && ab.ai(f, opp, dist, this, w)) return this.set('ability', ab.name, { slot: ab.slot });
+        }
+      } else if (f.cd.special <= 0) {
+        const call = f.def.aiSpecial(f, opp, dist, this, w);
+        if (call) return this.set('special', call);
+      }
     }
 
     // 6. Positioning.
@@ -312,6 +339,15 @@ class CpuController {
         break;
       case 'bankai': case 'special': case 'heavy':
         if (!pl.done) { it[pl.kind] = true; pl.done = true; }
+        break;
+      case 'ability': // the direction held picks which bankai ability comes out
+        if (!pl.done) {
+          it.special = true;
+          if (pl.slot === 'f') it.move = f.facing;
+          if (pl.slot === 'b') it.move = -f.facing;
+          if (pl.slot === 'd') it.guard = true;
+          pl.done = true;
+        }
         break;
       case 'approach': it.move = this.approachMove(pl.dir); break;
       case 'attack':

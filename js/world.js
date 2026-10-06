@@ -2,6 +2,8 @@
 // The match simulation: two fighters plus everything their bankai put into
 // the arena. No drawing here, so it runs headless in the tests.
 
+const PRESS_ACTIONS = ['jump', 'light', 'heavy', 'special', 'dash', 'bankai'];
+
 function zoneContains(z, f) {
   return z.contains ? z.contains(z, f) : circleRect(z.x, z.y, z.r, f.hurtbox());
 }
@@ -35,6 +37,12 @@ class World {
   say(f, text, color) {
     const stacked = this.texts.filter(t => t.follow === f && t.life > 45).length;
     this.texts.push({ follow: f, x: f.x, y: f.y - f.h - 34 - stacked * 22, text, color, life: 70 });
+  }
+
+  // Named techniques are announced, bigger, above the user.
+  call(f, text) {
+    this.texts = this.texts.filter(t => !(t.follow === f && t.big));
+    this.texts.push({ follow: f, x: f.x, y: f.y - f.h - 70, text, color: '#f2c14e', life: 60, big: true });
   }
 
   emit(e) { this.events.push(e); }
@@ -126,10 +134,11 @@ class World {
     }
     if (this.phase !== 'fight') { if (--this.phaseT <= 0) this.phase = 'fight'; return; }
     if (this.release) { if (--this.release.t <= 0) this.finishRelease(); return; }
-    if (this.hitstop > 0) { this.hitstop--; return; }
+    if (this.hitstop > 0) { this.hitstop--; this.holdPresses(intents); return; }
     this.frame++;
     if (--this.timer <= 0) return this.timeUp();
 
+    intents = this.mergeHeld(intents);
     for (const f of this.fighters) f.fx.onIce = !!this.ice && this.ice !== f;
     this.fighters[0].update(intents[0]);
     this.fighters[1].update(intents[1]);
@@ -142,7 +151,12 @@ class World {
       } else {
         f.reiatsu = Math.min(100, f.reiatsu + 1.5 / 60);
       }
-      this.damage(opp, f, bleedRate(f));
+      this.damage(opp, f, statusDamage(f));
+      // Karamatsu Shinju, third act: drowning drains reiatsu (and any bankai it powers).
+      if (f.fx.drowning > 0) {
+        f.reiatsu = Math.max(0, f.reiatsu - 0.25);
+        if (f.bankai && f.reiatsu <= 0) this.endBankai(f);
+      }
     }
     this.separate();
     this.meleeHits();
@@ -158,6 +172,23 @@ class World {
       if (f.history.length > 40) f.history.shift();
     }
     this.checkKo();
+  }
+
+  // Buttons pressed during a hit-pause are kept until the fighters can act.
+  holdPresses(intents) {
+    this.held = this.held || [emptyIntent(), emptyIntent()];
+    intents.forEach((it, i) => { for (const a of PRESS_ACTIONS) if (it[a]) this.held[i][a] = true; });
+  }
+
+  mergeHeld(intents) {
+    if (!this.held) return intents;
+    const out = intents.map((it, i) => {
+      const m = Object.assign({}, it);
+      for (const a of PRESS_ACTIONS) if (this.held[i][a]) m[a] = true;
+      return m;
+    });
+    this.held = null;
+    return out;
   }
 
   tickFx() {
@@ -184,12 +215,22 @@ class World {
     const hits = [];
     for (const f of this.fighters) {
       if (!f.isActive()) continue;
-      const t = this.opponentOf(f);
-      if (overlap(f.hitbox(), t.hurtbox())) hits.push([f, t, f.move]);
+      const t = this.opponentOf(f), box = f.hitbox();
+      if (overlap(box, t.hurtbox())) { hits.push([f, t, f.move]); continue; }
+      // Clones and decoys take the swing meant for the real thing.
+      const decoy = this.summons.find(s => s.decoy && s.owner === t && !s.dead && overlap(box, { x: s.x - 23, y: s.y - t.h, w: 46, h: t.h }));
+      if (decoy) {
+        decoy.dead = true;
+        f.moveHit = true;
+        this.burst(decoy.x, decoy.y - 60, '#ffffff', 16, 5);
+        this.emit({ type: 'decoyBroken', ref: decoy, by: f });
+      }
     }
     // Trades resolve together: the first hit interrupts the second attacker's move.
     for (const [f, t, move] of hits) {
       f.moveHit = true;
+      f.moveHits++;
+      f.nextHitT = f.moveT + (move.hitEvery || 6);
       this.applyHit(f, t, move, sign(f.x - t.x), true);
     }
   }
@@ -198,6 +239,13 @@ class World {
   applyHit(src, t, hit, fromSide, melee = false) {
     if (t.invuln > 0 || t.state === 'ko' || this.phase !== 'fight') return 'miss';
     const s = t.fx;
+    if (hit.fromBehind) fromSide = -t.facing; // Sakanade: the blow arrives from the side you aren't facing
+    // Chikasumi no Tate: Kisuke's blood-mist shield stops anything from the front.
+    if (t.shield > 0 && t.facing === fromSide) {
+      this.burst(t.x + fromSide * 30, t.y - t.h / 2, '#ff5a6a', 10, 4);
+      this.emit({ type: 'shielded', src, target: t });
+      return 'block';
+    }
     const guarding = t.state === 'guard' && (hit.anySide || t.facing === fromSide);
     if (guarding && !hit.unblockable) {
       t.hp -= hit.damage * 0.1;
@@ -222,6 +270,8 @@ class World {
       this.emit({ type: 'guardCrushed', src, target: t });
     }
     let dmg = hit.damage * src.outMul();
+    if (t.robe > 0) dmg *= 0.4;     // Zanjitsu Gokui
+    if (t.armorT > 0) dmg *= 0.5;   // Kokujo Tengen Myo-o's armour
     if (s.frozen > 0) {
       dmg *= 1.4;
       s.frozen = 0;
@@ -229,15 +279,19 @@ class World {
       this.burst(t.x, t.y - t.h / 2, '#cff', 24, 7);
     }
     this.damage(src, t, dmg);
-    if (t.bankai && t.def.armor) {
+    if ((t.bankai && t.def.armor) || t.armorT > 0) {
       this.emit({ type: 'armored', src, target: t });
     } else if (s.trapped <= 0) {
+      // Each consecutive hit stuns for less, so no string lasts forever.
+      const reeling = t.state === 'hitstun' || t.state === 'guardbreak';
+      t.combo = reeling ? t.combo + 1 : 1;
+      const weight = t.def.weight || 1;
       t.move = null;
       t.buffer = null;
       t.state = 'hitstun';
-      t.stun = hit.stun || 16;
-      t.vx = -fromSide * (hit.kb || 2);
-      if (hit.kby) { t.vy = hit.kby; t.onGround = false; }
+      t.stun = (hit.stun || 16) * Math.max(0.3, 1 - 0.2 * (t.combo - 1));
+      t.vx = -fromSide * (hit.kb || 2) / weight * (1 + 0.08 * (t.combo - 1));
+      if (hit.kby) { t.vy = hit.kby / Math.sqrt(weight); t.onGround = false; t.launched = true; }
     }
     if (hit.onHit) hit.onHit(src, t, this, hit);
     if (src.bankai && src.def.onHitDealt) src.def.onHitDealt(src, t, dmg, hit, this, melee);
@@ -263,9 +317,10 @@ class World {
       const t = this.opponentOf(p.owner);
       const rect = { x: p.x - p.w / 2, y: p.y - p.h / 2, w: p.w, h: p.h };
       if (!overlap(rect, t.hurtbox())) continue;
-      if (p.fake) { // Kinshara Butodan illusions dissolve on contact
+      if (p.fake) { // Kinshara Butodan illusions dissolve on contact, with a sting of imagined pain
         p.dead = true;
         this.burst(p.x, p.y, '#ffe9a0', 10, 3);
+        if (p.fakeDamage) this.damage(p.owner, t, p.fakeDamage);
         continue;
       }
       if (p.hitCd > 0) { p.hitCd--; continue; }

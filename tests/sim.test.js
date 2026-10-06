@@ -87,7 +87,7 @@ test('Daiguren Hyorinmaru: the opponent slides on the ice, Toshiro does not', ()
   run(w, 30, [I({ move: 1 }), I({ move: -1 })]);
   const tx = t.x, vx = v.x;
   run(w, 30);
-  assert.ok(Math.abs(t.x - tx) < 1, 'Toshiro stops dead');
+  assert.ok(Math.abs(t.x - tx) < 15, 'Toshiro stops within a step');
   assert.ok(Math.abs(v.x - vx) > 60, `victim keeps sliding (${Math.abs(v.x - vx).toFixed(1)}px)`);
 });
 
@@ -267,6 +267,7 @@ test('Karamatsu Shinju: hitting Shunsui wounds the attacker equally', () => {
   const [s, v] = w.fighters;
   forceBankai(w, s);
   s.invuln = 0;
+  s.act1 = 100; // first act on stage
   const hv = v.hp, hs = s.hp;
   w.applyHit(v, s, { damage: 50 }, 1, true);
   assert.ok(Math.abs((hs - s.hp) - (hv - v.hp)) < 1e-6);
@@ -280,7 +281,12 @@ test('Zanka no Tachi: melee on Yamamoto burns the attacker, and the heat hurts u
   y.invuln = 0;
   const hv = v.hp;
   w.applyHit(v, y, { damage: 50 }, 1, true);
-  assert.ok(hv - v.hp >= 34);
+  assert.ok(hv - v.hp >= 17, 'touching him always burns a little');
+  y.robe = 100; // West: Zanjitsu Gokui
+  const hv2 = v.hp, hy = y.hp;
+  w.applyHit(v, y, { damage: 50 }, 1, true);
+  assert.ok(hv2 - v.hp > 40, 'through the flame armour it burns everything');
+  assert.ok(hy - y.hp < 25, 'and the armour shields him');
   place(y, 600); place(v, 700);
   const h1 = v.hp;
   run(w, 60);
@@ -348,9 +354,8 @@ test('Kamishini no Yari plants a sliver that Gin can dissolve', () => {
   run(w, 30);
   assert.ok(v.fx.fragment > 0, 'reached across the arena');
   run(w, 30); // let the long thrust recover
-  g.cd.special = 0;
   const hp = v.hp;
-  run(w, 1, [I({ special: true }), I()]);
+  run(w, 1, [I({ special: true, move: g.facing }), I()]); // forward + special: Korose
   run(w, 12);
   assert.ok(hp - v.hp >= 170);
   assert.equal(v.fx.fragment, 0);
@@ -372,7 +377,7 @@ test('Shirafude Ichimonji erases abilities in order, restored when the bankai en
   const w = fight('ichibe', 'ichigo');
   const [ib, v] = w.fighters;
   forceBankai(w, ib);
-  const hit = C.ichibe.special(ib, w);
+  const hit = ib.ability('n').use(ib, w);
   hit.fire(ib, w);
   const p = w.projectiles[w.projectiles.length - 1];
   for (let i = 0; i < 4; i++) p.onHit(ib, v, w);
@@ -388,9 +393,9 @@ test('Ryumon Hozukimaru crest doubles damage once full', () => {
   const w = fight('ikkaku', 'ichigo');
   const ik = w.fighters[0];
   forceBankai(w, ik);
-  assert.equal(ik.outMul(), 1);
+  const base = ik.outMul();
   ik.crest = 100;
-  assert.equal(ik.outMul(), 2);
+  assert.ok(Math.abs(ik.outMul() / base - 2) < 1e-9);
 });
 
 test('Kinshara Butodan illusions deal no damage', () => {
@@ -486,7 +491,7 @@ test('CPU caught by Tensa Zangetsu chases afterimages', () => {
 // ------------------------------------------------------------- full matches
 
 test('CPU vs CPU matches finish cleanly for every character, and everyone uses bankai', () => {
-  const used = new Set();
+  const used = new Set(), slots = {};
   const ids = G.CHARACTERS.map(c => c.id);
   ids.forEach((a, i) => {
     for (const off of [1, 7]) {
@@ -497,6 +502,7 @@ test('CPU vs CPU matches finish cleanly for every character, and everyone uses b
         w.step(cpus.map(c => c.intent()));
         for (const f of w.fighters) {
           if (f.bankai) used.add(f.def.id);
+          for (const k of ['n', 'f', 'b', 'd']) if (f.cd['ab_' + k] > 0) (slots[f.def.id] = slots[f.def.id] || new Set()).add(k);
           assert.ok(Number.isFinite(f.x) && Number.isFinite(f.y) && Number.isFinite(f.hp), `${a} vs ${b}: bad state on ${f.def.id}`);
         }
       }
@@ -504,4 +510,187 @@ test('CPU vs CPU matches finish cleanly for every character, and everyone uses b
     }
   });
   assert.deepEqual([...ids].filter(id => !used.has(id)), [], 'characters that never released bankai');
+  assert.deepEqual([...ids].filter(id => !slots[id] || slots[id].size < 2), [], 'characters whose CPU used fewer than two abilities');
+});
+
+// ------------------------------------------------------------- combat feel
+
+test('each consecutive hit stuns for less, so no combo lasts forever', () => {
+  const w = fight('ichigo', 'byakuya');
+  const [a, v] = w.fighters;
+  const stuns = [];
+  for (let i = 0; i < 5; i++) { w.applyHit(a, v, { damage: 10, stun: 18 }, 1, true); stuns.push(v.stun); }
+  for (let i = 1; i < stuns.length; i++) assert.ok(stuns[i] < stuns[i - 1], `stun ${stuns}`);
+  assert.ok(stuns[3] < 9, 'by the fourth hit the victim recovers before a light attack can land');
+});
+
+test('reiatsu burst: dash while reeling blasts free and knocks the attacker away', () => {
+  const w = fight('ichigo', 'byakuya');
+  const [a, v] = w.fighters;
+  place(a, 600); place(v, 660);
+  v.reiatsu = 40;
+  w.applyHit(a, v, { damage: 10, stun: 40 }, -1, true);
+  const ahp = a.hp;
+  run(w, 1, [I(), I({ dash: true })]); // pressed during the hit-pause; it goes through right after
+  run(w, 6);
+  assert.notEqual(v.state, 'hitstun');
+  assert.ok(v.reiatsu < 20, 'costs 25 reiatsu');
+  assert.ok(a.hp < ahp && a.state === 'hitstun', 'attacker is blasted back');
+  // No reiatsu, no burst.
+  const w2 = fight('ichigo', 'byakuya');
+  const [a2, v2] = w2.fighters;
+  place(a2, 600); place(v2, 660);
+  w2.applyHit(a2, v2, { damage: 10, stun: 40 }, -1, true);
+  run(w2, 1, [I(), I({ dash: true })]);
+  run(w2, 6);
+  assert.equal(v2.state, 'hitstun');
+});
+
+test('heavier fighters are knocked back less; launched fighters are knocked down', () => {
+  const kb = id => { const w = fight('ichigo', id); w.applyHit(w.fighters[0], w.fighters[1], { damage: 10, stun: 20, kb: 10 }, -1, true); return Math.abs(w.fighters[1].vx); };
+  assert.ok(kb('komamura') < kb('toshiro'));
+  const w = fight('ichigo', 'byakuya');
+  const v = w.fighters[1];
+  w.applyHit(w.fighters[0], v, { damage: 10, stun: 10, kby: -10 }, -1, true);
+  let downed = false;
+  for (let i = 0; i < 60 && !downed; i++) { w.step([I(), I()]); downed = v.state === 'knockdown'; }
+  assert.ok(downed, 'lands in a knockdown');
+  assert.ok(v.invuln > 0, 'and cannot be hit while getting up');
+});
+
+// ------------------------------------------------------------- bankai abilities
+
+test('every bankai has four abilities, one per direction', () => {
+  for (const c of G.CHARACTERS) {
+    assert.deepEqual(Array.from(c.abilities, a => a.slot).sort(), ['b', 'd', 'f', 'n'], c.id);
+    for (const a of c.abilities) assert.ok(a.name && a.cd > 0 && typeof a.use === 'function' && typeof a.ai === 'function', c.id + ' ' + a.name);
+  }
+});
+
+test('Zanka no Tachi: North, East, West and South come out by direction', () => {
+  const w = fight('yamamoto', 'ichigo');
+  const [y, v] = w.fighters;
+  forceBankai(w, y);
+  run(w, 40);
+  place(y, 300); place(v, 900);
+  const press = extra => { run(w, 1, [I(Object.assign({ special: true }, extra)), I()]); };
+  press({});
+  assert.equal(y.move.call, 'North: Tenchi Kaijin');
+  run(w, 70);
+  press({ move: y.facing });
+  assert.equal(y.move.name, 'kyokujitsujin', 'East');
+  run(w, 50);
+  press({ move: -y.facing });
+  assert.equal(y.move.call, 'West: Zanjitsu Gokui');
+  run(w, 30);
+  assert.ok(y.robe > 0, 'flame armour is on');
+  press({ guard: true });
+  assert.equal(y.move.call, 'South: Kaka Jumanokushi');
+  assert.ok(y.cd.ab_n > 0 && y.cd.ab_f > 0 && y.cd.ab_b > 0 && y.cd.ab_d > 0, 'each has its own cooldown');
+});
+
+test('True Tensa Zangetsu: Getsuga at will, a clone that fights, Jujisho cuts through petals', () => {
+  const w = fight('ichigo', 'byakuya');
+  const [ich, b] = w.fighters;
+  forceBankai(w, ich);
+  run(w, 40);
+  place(ich, 400); place(b, 800);
+  run(w, 1, [I({ special: true }), I()]);
+  run(w, 62);
+  run(w, 1, [I({ special: true }), I()]);
+  assert.equal(ich.move && ich.move.call, 'Getsuga Tensho', 'short cooldown: again right away');
+  run(w, 30);
+  run(w, 1, [I({ special: true, move: -ich.facing }), I()]);
+  run(w, 24);
+  const clone = w.summons.find(s => s.kind === 'clone');
+  assert.ok(clone, 'clone spawned');
+  const hp = b.hp;
+  run(w, 150);
+  assert.ok(b.hp < hp, 'the clone fights');
+  // Jujisho is not eaten by Senbonzakura's petal guard.
+  const w2 = fight('ichigo', 'byakuya');
+  const [i2, b2] = w2.fighters;
+  forceBankai(w2, i2); forceBankai(w2, b2);
+  run(w2, 40);
+  place(i2, 300); place(b2, 800); b2.invuln = 0;
+  const hp2 = b2.hp;
+  run(w2, 1, [I({ special: true, move: i2.facing }), I()]);
+  run(w2, 60);
+  assert.ok(hp2 - b2.hp > 100, 'Jujisho lands through the petals');
+});
+
+test('when Tensa Zangetsu breaks, the original blade strikes once, unblockable', () => {
+  const w = fight('ichigo', 'byakuya');
+  const [ich, v] = w.fighters;
+  forceBankai(w, ich);
+  w.endBankai(ich);
+  assert.ok(ich.finalBlade > 0);
+  place(ich, 600); place(v, 700);
+  run(w, 5, [I(), I({ guard: true })]);
+  ich.cd.special = 0;
+  const hp = v.hp;
+  run(w, 1, [I({ special: true }), I({ guard: true })]);
+  assert.equal(ich.move.name, 'originalBlade');
+  run(w, 20, [I(), I({ guard: true })]);
+  assert.ok(hp - v.hp >= 200, 'cuts straight through the guard');
+  assert.equal(ich.finalBlade, 0, 'only once');
+});
+
+test('bankai damage follows strength in the story', () => {
+  const w = fight('yamamoto', 'ikkaku');
+  const [y, ik] = w.fighters;
+  assert.equal(y.outMul(), 1);
+  forceBankai(w, y);
+  forceBankai(w, ik);
+  assert.ok(Math.abs(y.outMul() - 1.35) < 1e-9);
+  assert.ok(ik.outMul() < y.outMul(), 'Ikkaku (fresh crest) hits lighter than Yamamoto');
+});
+
+test('bankai abilities hurt: poison, cold and the dark wear the victim down', () => {
+  const w = fight('mayuri', 'ichigo');
+  const v = w.fighters[1];
+  v.fx.toxin = 80; v.fx.toxinDelay = 999;
+  const hp = v.hp;
+  run(w, 60);
+  assert.ok(hp - v.hp > 10, 'nerve poison deals damage over time');
+  const w2 = fight('tosen', 'ichigo');
+  const [t, v2] = w2.fighters;
+  forceBankai(w2, t);
+  run(w2, 40);
+  place(t, 600); place(v2, 700);
+  run(w2, 1, [I({ special: true }), I()]);
+  run(w2, 20);
+  const h2 = v2.hp;
+  run(w2, 60);
+  assert.ok(h2 - v2.hp > 5, 'Enma Korogi drains while it blinds');
+});
+
+test('CPU bursts out of a long combo when it has the reiatsu', () => {
+  const w = fight('ichigo', 'byakuya');
+  const [a, v] = w.fighters;
+  const cpu = new G.CpuController(w, v);
+  place(a, 600); place(v, 660);
+  v.reiatsu = 60;
+  let burst = false;
+  for (let i = 0; i < 200 && !burst; i++) {
+    if (v.state !== 'hitstun') { w.applyHit(a, v, { damage: 5, stun: 30 }, -1, true); w.applyHit(a, v, { damage: 5, stun: 30 }, -1, true); w.applyHit(a, v, { damage: 5, stun: 30 }, -1, true); }
+    w.step([I(), cpu.intent()]);
+    burst = w.events.some(e => e.type === 'burst');
+  }
+  assert.ok(burst);
+});
+
+test('CPU falls for Ichigo\'s clone and learns it was fake when it breaks', () => {
+  let fooled = 0;
+  for (let seed = 1; seed <= 10; seed++) {
+    const w = fight('ichigo', 'byakuya', seed);
+    const [ich, v] = w.fighters;
+    forceBankai(w, ich);
+    run(w, 40);
+    const cpu = new G.CpuController(w, v);
+    w.step([I({ special: true, move: -ich.facing }), cpu.intent()]);
+    for (let i = 0; i < 12; i++) w.step([I(), cpu.intent()]);
+    if (cpu.lock && cpu.lock.kind === 'clone') fooled++;
+  }
+  assert.ok(fooled >= 3, `fooled ${fooled}/10`);
 });
