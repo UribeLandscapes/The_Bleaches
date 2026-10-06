@@ -6,7 +6,7 @@ Every character whose bankai appears in the manga is playable (22 in total).
 
 ## Play
 
-Open `index.html` in a browser. There's no install and no build step (Three.js is bundled in `vendor/`). A keyboard is required.
+Open `index.html` in a browser. There's no install and no build step (Three.js is bundled in `vendor/`). Play with a keyboard or an Xbox controller.
 
 - **VS CPU**: you against a CPU opponent. The CPU's decisions are visibly disrupted by bankai, and its current thinking appears under its health bar.
 - **Local 2 players**: two players on one keyboard. Here bankai disrupt human inputs, footing and visibility.
@@ -15,10 +15,13 @@ Open `index.html` in a browser. There's no install and no build step (Three.js i
 |---|---|---|---|---|---|---|---|---|
 | Player 1 | A / D | W | S | F | G | H | R | T |
 | Player 2 | ← / → | ↑ | ↓ | , | . | / | ; | ' |
+| Xbox controller | Left stick / D-pad | A (or up) | LB / LT (or down), hold | X | Y | B | RB | RT |
+
+**Xbox controller.** Plug in or pair the controller and press any button; the game shows "Controller connected". The first controller plays as P1 and a second one as P2 (with one controller in 2-player mode, P2 stays on the keyboard). The keyboard keeps working alongside it. The four bankai abilities are B, toward + B, away + B, and LB + B. Dash while being hit (RB) bursts free. The Menu (≡) button pauses; in menus use the stick or D-pad, A to confirm and B to go back. Controllers work when you open `index.html` directly in Chrome or Edge; some embedded views (such as the claude.ai preview) block controller access, and the title screen says so when that happens.
 
 - **Bankai:** the reiatsu gauge fills as you fight. When it flashes **BANKAI READY**, release your bankai. It lasts until the gauge drains (about 20 seconds; some bankai are shorter). Using abilities burns bankai time.
 - **Bankai abilities:** in bankai the special key does four different things. Press it on its own, while holding toward the opponent, while holding away from them, or while guarding. Each ability has its own cooldown, shown in the bar under your health. In shikai the special key has a single move.
-- **Escaping combos:** each hit in a row stuns for less, so no string lasts forever. Dash while being hit to **burst** free; it costs 25 reiatsu and knocks the attacker back. Launched fighters are knocked down and can't be hit while getting up.
+- **Escaping combos:** each hit in a row stuns for less, so no string lasts forever. Buttons pressed in the last moments of being hit (about 0.13 s) still go through as soon as you recover. Dash while being hit to **burst** free; it costs 25 reiatsu and knocks the attacker back. Launched fighters are knocked down and can't be hit while getting up.
 - **Traps:** in Gokei, Itodome, the burnt dead and the loom, mash attack buttons to break free.
 - **Spirit orbs:** each fighter has two. Empty the health bar to shatter one; shatter both to win. Esc pauses.
 
@@ -92,6 +95,7 @@ Only bankai shown in the manga are included. Bankai that appear only in the nove
 | `js/characters.js` | The roster: each shikai special, bankai rule and four abilities |
 | `js/world.js` | Match simulation: hits, projectiles, zones, telegraphed strikes, summons |
 | `js/ai.js` | CPU opponent |
+| `js/gamepad.js` | Xbox / standard controllers through the Gamepad API |
 | `js/look.js` | How each fighter looks and is posed |
 | `js/scene3d.js` | Three.js scene: arena, toon-shaded models, camera, bankai effects |
 | `js/hud.js` | 2D overlay: HUD, ability cooldowns, callouts, banners |

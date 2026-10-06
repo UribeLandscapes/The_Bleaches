@@ -694,3 +694,17 @@ test('CPU falls for Ichigo\'s clone and learns it was fake when it breaks', () =
   }
   assert.ok(fooled >= 3, `fooled ${fooled}/10`);
 });
+
+test('a press made while reeling still fires the moment the fighter can act', () => {
+  const w = fight('ichigo', 'byakuya');
+  const [a, v] = w.fighters;
+  place(a, 400); place(v, 900);
+  w.applyHit(a, v, { damage: 5, stun: 12 }, -1, true);
+  run(w, 4);                                   // hit-pause
+  run(w, 6);                                   // still reeling
+  assert.equal(v.state, 'hitstun');
+  run(w, 1, [I(), I({ light: true })]);        // pressed a few frames too early
+  let attacked = false;
+  for (let i = 0; i < 8 && !attacked; i++) { w.step([I(), I()]); attacked = v.state === 'attack'; }
+  assert.ok(attacked, 'buffered attack came out');
+});

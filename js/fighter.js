@@ -17,6 +17,8 @@ const DAZE_DELAY = 12;     // frames of input lag while concussed
 const BURST_COST = 25;     // reiatsu spent to blast out of a combo
 const BURST_HIT = { damage: 10, stun: 24, kb: 14, kby: -4, anySide: true, unblockable: true };
 const WALK_ACCEL = 1.1;    // ground speed builds and bleeds off over a few frames
+const INPUT_BUFFER = 8;    // a press made while busy (e.g. reeling) still fires if the fighter frees up this soon
+const BUFFERED = ['jump', 'light', 'heavy', 'special', 'dash', 'bankai'];
 
 class Fighter {
   constructor(def, side, world) {
@@ -59,6 +61,7 @@ class Fighter {
     this.complainedAt = {};
     this.guardHeldPrev = false;
     this.inputQueue = [];
+    this.buf = {};
     this.animT = 0;
   }
 
@@ -150,6 +153,13 @@ class Fighter {
       raw = Object.assign({}, raw, { dash: false });
     }
 
+    // Short input buffer: recent presses stay live until the fighter can act on them.
+    raw = Object.assign({}, raw);
+    for (const a of BUFFERED) {
+      if (raw[a]) this.buf[a] = INPUT_BUFFER;
+      else if (this.buf[a] > 0) { this.buf[a]--; raw[a] = true; }
+    }
+
     const { intent, blocked } = filterIntent(this, raw);
     this.lastBlocked = blocked;
     for (const b of blocked) this.complain(b);
@@ -202,19 +212,20 @@ class Fighter {
     const faceX = s.outpaced > 0 ? opp.historyAt(OUTPACE_LAG).x : opp.x;
     if (s.blind <= 0 && Math.abs(faceX - this.x) > 6) this.facing = (faceX > this.x ? 1 : -1) * (s.reversed > 0 ? -1 : 1);
 
-    if (it.bankai && !this.bankai && this.reiatsu >= 100) return w.startRelease(this);
+    if (it.bankai && !this.bankai && this.reiatsu >= 100) { this.buf = {}; return w.startRelease(this); }
     if (it.special) {
       const slot = it.guard ? 'd' : it.move === this.facing ? 'f' : it.move === -this.facing ? 'b' : 'n';
       const m = this.bankai ? this.useAbility(slot) : this.cd.special <= 0 ? this.def.special(this, w) : null;
-      if (m) return this.startMove(m);
+      if (m) { this.buf = {}; return this.startMove(m); }
     }
-    if (it.heavy) return this.startMove(this.moves().heavy);
-    if (it.light) return this.startMove(this.onGround ? this.moves().light1 : this.moves().air);
+    if (it.heavy) { this.buf = {}; return this.startMove(this.moves().heavy); }
+    if (it.light) { this.buf = {}; return this.startMove(this.onGround ? this.moves().light1 : this.moves().air); }
     if (it.dash && this.cd.dash <= 0) {
+      this.buf = {};
       if (this.def.dash && this.def.dash(this, it, w)) return;
       return this.startDash(it.move || this.facing);
     }
-    if (it.jump && this.onGround) { this.vy = -this.stat('jump'); this.onGround = false; }
+    if (it.jump && this.onGround) { this.buf.jump = 0; this.vy = -this.stat('jump'); this.onGround = false; }
     if (it.guard && this.onGround) { this.state = 'guard'; return; }
     this.state = !this.onGround ? 'jump' : it.move ? 'walk' : 'idle';
   }

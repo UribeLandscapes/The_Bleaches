@@ -14,6 +14,7 @@ const SLOT_KEYS = [
   { n: 'H', f: '→H', b: '←H', d: 'S+H' },
   { n: '/', f: '→/', b: '←/', d: '↓+/' },
 ];
+const PAD_SLOT_KEYS = { n: 'B', f: '→B', b: '←B', d: 'LB+B' };
 
 function circle(ctx, x, y, r) { ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2); ctx.fill(); }
 function roundRect(ctx, x, y, w, h, r) {
@@ -129,7 +130,7 @@ function drawAbilities(ctx, f, left, bx, barW, y, keys) {
   });
 }
 
-function drawHud(ctx, w, minds, mode) {
+function drawHud(ctx, w, minds, mode, padSides = []) {
   for (const f of w.fighters) {
     const left = f.side === 0, x0 = left ? 32 : W - 32, dir = left ? 1 : -1, barW = 500;
     const bx = left ? x0 : x0 - barW;
@@ -160,10 +161,11 @@ function drawHud(ctx, w, minds, mode) {
     ctx.fillStyle = f.bankai ? GOLD : full ? (w.frame % 30 < 15 ? '#bfe6ff' : REI) : REI;
     ctx.fillRect(left ? bx : bx + barW - rw, 69, rw, 6);
     const burst = f.cd.burst <= 0 && f.reiatsu >= BURST_COST;
-    const reiLabel = f.bankai ? 'BANKAI ACTIVE' : full ? `BANKAI READY · ${f.side === 0 ? 'T' : "'"}` : burst ? 'BURST READY · DASH WHILE HIT' : 'REIATSU';
+    const pad = padSides[f.side];
+    const reiLabel = f.bankai ? 'BANKAI ACTIVE' : full ? `BANKAI READY · ${pad ? 'RT' : f.side === 0 ? 'T' : "'"}` : burst ? `BURST READY · ${pad ? 'RB' : 'DASH'} WHILE HIT` : 'REIATSU';
     text(ctx, reiLabel, left ? bx + barW * 0.7 + 12 : bx + barW * 0.3 - 12, 77, 13, full || f.bankai ? GOLD : burst ? '#bfe6ff' : '#8d88a0', left ? 'left' : 'right');
     const isHuman = !(minds && minds[f.side]);
-    drawAbilities(ctx, f, left, bx, barW, 84, SLOT_KEYS[mode === 'cpu' ? 0 : f.side]);
+    drawAbilities(ctx, f, left, bx, barW, 84, pad ? PAD_SLOT_KEYS : SLOT_KEYS[mode === 'cpu' ? 0 : f.side]);
     drawChips(ctx, statusChips(f), left, bx, barW, 112);
     if (!isHuman) text(ctx, 'CPU · ' + minds[f.side], x0, 150, 15, '#c9c3d8', left ? 'left' : 'right', FONT_UI, 600);
     // Combo counter for the attacker

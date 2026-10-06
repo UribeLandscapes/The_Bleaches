@@ -1,5 +1,5 @@
 'use strict';
-// Menus, keyboard input and the main loop.
+// Menus, keyboard and controller input, and the main loop.
 
 const canvas = document.getElementById('hud');   // 2D overlay: HUD, menus, text
 const ctx = canvas.getContext('2d');
@@ -14,6 +14,7 @@ const KEY_LABELS = [
   'A/D move · W jump · S guard · F light · G heavy · H special · R dash · T bankai',
   "←/→ move · ↑ jump · ↓ guard · , light · . heavy · / special · ; dash · ' bankai",
 ];
+const PAD_LABEL = 'Stick move · A jump · LB guard · X light · Y heavy · B special · RB dash · RT bankai';
 const GAME_KEYS = new Set([...KEYMAPS.flatMap(m => Object.values(m)), 'Space', 'Enter', 'Escape']);
 
 const held = new Set();
@@ -41,6 +42,7 @@ const state = {
   controllers: null,
   overT: 0,
   t: 0,
+  toast: null,
 };
 window.game = state; // handy for debugging from the console
 
@@ -56,8 +58,8 @@ function startFight() {
   const [a, b] = state.picks.map(i => CHARACTERS[i]);
   state.world = new World(a, b, (Math.random() * 1e9) | 0);
   state.controllers = [
-    new KeyboardController(KEYMAPS[0]),
-    state.mode === 'cpu' ? new CpuController(state.world, state.world.fighters[1]) : new KeyboardController(KEYMAPS[1]),
+    new MergedController([new KeyboardController(KEYMAPS[0]), new GamepadController(0)]),
+    state.mode === 'cpu' ? new CpuController(state.world, state.world.fighters[1]) : new MergedController([new KeyboardController(KEYMAPS[1]), new GamepadController(1)]),
   ];
   state.overT = 0;
   state.screen = 'fight';
@@ -156,6 +158,24 @@ addEventListener('keydown', e => {
 addEventListener('keyup', e => held.delete(e.code));
 addEventListener('blur', () => held.clear());
 
+// Controller buttons drive the menus by standing in for that player's keys.
+const PAD_MENU_KEYS = [
+  { left: 'KeyA', right: 'KeyD', up: 'KeyW', down: 'KeyS', ok: 'KeyF', undo: 'KeyG' },
+  { left: 'ArrowLeft', right: 'ArrowRight', up: 'ArrowUp', down: 'ArrowDown', ok: 'Comma', undo: 'Period' },
+];
+
+function onPadButton(slot, k) {
+  const s = state, p = s.mode === 'cpu' ? 0 : slot, keys = PAD_MENU_KEYS[p];
+  if (k === 'start') return onKey(s.screen === 'fight' || s.screen === 'pause' ? 'Escape' : 'Enter');
+  if (k === 'back') return onKey('Escape');
+  if (keys[k]) return onKey(keys[k]);
+  if (k === 'a') return onKey(keys.ok);
+  if (k === 'b' && s.screen !== 'fight') return onKey(s.screen === 'select' && s.locked[s.mode === 'cpu' ? 0 : p] ? keys.undo : 'Escape');
+}
+
+addEventListener('gamepadconnected', e => { state.toast = { text: `Controller connected (${e.gamepad.index === 0 ? 'P1' : 'P2'})`, t: 150 }; });
+addEventListener('gamepaddisconnected', () => { state.toast = { text: 'Controller disconnected', t: 150 }; });
+
 // ------------------------------------------------------------------ loop
 
 function update() {
@@ -166,6 +186,8 @@ function update() {
     if (w.phase === 'over' && ++state.overT > 150) { state.screen = 'result'; state.menuIndex = 0; }
   }
   pressed.clear(); // presses are consumed by the first simulation step that sees them
+  clearPadPresses();
+  if (state.toast && --state.toast.t <= 0) state.toast = null;
 }
 
 function render() {
@@ -179,10 +201,14 @@ function render() {
   else {
     view.renderFight(s.world);
     drawWorldOverlay(ctx, s.world, (x, y) => view.project(x, y));
-    drawHud(ctx, s.world, s.controllers.map(c => c.mind !== undefined ? c.mind : null), s.mode);
+    drawHud(ctx, s.world, s.controllers.map(c => c.mind !== undefined ? c.mind : null), s.mode, [pads[0].connected, s.mode === 'versus' && pads[1].connected]);
     drawReleaseText(ctx, s.world);
     drawBanner(ctx, s.world);
-    if (s.world.phase === 'intro') text(ctx, s.mode === 'cpu' ? 'P1  ' + KEY_LABELS[0] + '   ·   Esc pause' : 'P1  ' + KEY_LABELS[0] + '      P2  ' + KEY_LABELS[1], W / 2, H - 18, 15, '#d8d2e4', 'center', FONT_UI, 600);
+    if (s.world.phase === 'intro') {
+      const p1 = pads[0].connected ? PAD_LABEL : KEY_LABELS[0], p2 = pads[1].connected ? PAD_LABEL : KEY_LABELS[1];
+      text(ctx, s.mode === 'cpu' ? 'P1  ' + p1 + '   ·   Esc / Menu pause' : 'P1  ' + p1, W / 2, H - (s.mode === 'cpu' ? 18 : 40), 15, '#d8d2e4', 'center', FONT_UI, 600);
+      if (s.mode === 'versus') text(ctx, 'P2  ' + p2, W / 2, H - 18, 15, '#d8d2e4', 'center', FONT_UI, 600);
+    }
     if (s.screen === 'pause') drawMenuOverlay('PAUSED', PAUSE_ITEMS, true);
     if (s.screen === 'result') {
       const w = s.world, who = w.winner ? w.winner.def.name.toUpperCase() + ' WINS' : 'DRAW';
@@ -195,8 +221,10 @@ let last = performance.now(), acc = 0;
 function frame(now) {
   acc += Math.min(100, now - last);
   last = now;
+  pollPads(onPadButton);
   while (acc >= 1000 / 60) { update(); acc -= 1000 / 60; }
   render();
+  if (state.toast) outlinedText(ctx, state.toast.text, W / 2, H - 70, 22, '#bfe6ff');
   requestAnimationFrame(frame);
 }
 
@@ -219,14 +247,15 @@ function drawTitle() {
     if (sel) { ctx.fillStyle = 'rgba(242,193,78,0.16)'; ctx.fillRect(W / 2 - 200, y - 36, 400, 48); ctx.fillStyle = GOLD; ctx.fillRect(W / 2 - 200, y - 36, 4, 48); }
     text(ctx, item, W / 2, y, 34, sel ? PAPER : '#9a94ab', 'center');
   });
-  text(ctx, 'W/S or ↑/↓ to choose · Enter to confirm · keyboard required (click the game first if keys do nothing)', W / 2, H - 32, 17, '#8d88a0', 'center', FONT_UI, 600);
+  text(ctx, 'Keyboard: W/S or ↑/↓ to choose, Enter to confirm (click the game first if keys do nothing) · Xbox controller: stick or D-pad, A to confirm', W / 2, H - 32, 16, '#8d88a0', 'center', FONT_UI, 600);
+  if (padsBlocked) text(ctx, 'This view blocks game controllers. To use one, open index.html directly in Chrome or Edge.', W / 2, H - 56, 16, '#ffb070', 'center', FONT_UI, 600);
 }
 
 function drawHowTo() {
   ctx.fillStyle = 'rgba(8,8,14,0.88)'; roundRect(ctx, 130, 300, W - 260, 400, 10); ctx.fill();
   const lines = [
-    ['Player 1', KEY_LABELS[0]],
-    ['Player 2', KEY_LABELS[1]],
+    ['Keyboard', 'P1  ' + KEY_LABELS[0] + '     P2  ' + KEY_LABELS[1]],
+    ['Controller', PAD_LABEL + '. Controller 1 is P1, controller 2 is P2.'],
     ['Bankai', 'Your reiatsu gauge fills as you fight. When it flashes BANKAI READY, release your bankai. It changes how the opponent can fight, and its damage matches its strength.'],
     ['Abilities', 'In bankai the special key does four things: on its own, toward the opponent, away from them, or while guarding. Each has its own cooldown.'],
     ['Escapes', 'Each hit in a row stuns for less. Dash while being hit to burst free (25 reiatsu). Trapped? Mash attack buttons.'],
@@ -271,8 +300,8 @@ function drawSelect() {
   for (const p of [0, 1]) drawInfoPanel(p, s.cursor[p], p === 0 ? 30 : W / 2 + 10, 316, W / 2 - 40, 380, active[p] >= 0 || s.locked[p], showBankai);
   ctx.fillStyle = 'rgba(6,6,14,0.78)'; ctx.fillRect(0, 696, W, H - 696); ctx.fillRect(0, 312, 30, 384); ctx.fillRect(W / 2 - 10, 312, 20, 384); ctx.fillRect(W - 30, 312, 30, 384);
   const hint = s.mode === 'cpu'
-    ? 'Arrows or WASD to move · Enter or F to pick · G to change your pick · Esc back'
-    : 'P1: WASD + F to pick (G undo) · P2: arrows + , to pick (. undo) · Esc back';
+    ? 'Arrows or WASD to move · Enter or F to pick · G to change your pick · Esc back · Controller: A pick, B back'
+    : 'P1: WASD + F to pick (G undo) · P2: arrows + , to pick (. undo) · Controllers: A pick, B undo · Esc back';
   text(ctx, hint, W / 2, H - 12, 16, '#8d88a0', 'center', FONT_UI, 600);
 }
 
@@ -316,8 +345,8 @@ function drawMenuOverlay(title, items, showControls, sub) {
     text(ctx, item, W / 2, y, 30, sel ? PAPER : '#9a94ab', 'center');
   });
   if (showControls) {
-    text(ctx, 'P1  ' + KEY_LABELS[0], W / 2, H - 70, 17, '#cfc8dc', 'center', FONT_UI, 600);
-    if (state.mode === 'versus') text(ctx, 'P2  ' + KEY_LABELS[1], W / 2, H - 44, 17, '#cfc8dc', 'center', FONT_UI, 600);
+    text(ctx, 'P1  ' + (pads[0].connected ? PAD_LABEL : KEY_LABELS[0]), W / 2, H - 70, 17, '#cfc8dc', 'center', FONT_UI, 600);
+    if (state.mode === 'versus') text(ctx, 'P2  ' + (pads[1].connected ? PAD_LABEL : KEY_LABELS[1]), W / 2, H - 44, 17, '#cfc8dc', 'center', FONT_UI, 600);
   }
 }
 
