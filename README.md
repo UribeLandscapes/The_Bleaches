@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/banner.png" alt="The Bleaches banner: pixel-art swordsmen with blue and red auras facing off under a full moon" width="100%">
+  <img src="assets/banner.png" alt="My Own Bankai banner: torn black ink title with a red brush slash and speed lines on rice paper" width="100%">
 </p>
 
 # The Bleaches
