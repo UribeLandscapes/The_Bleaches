@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/banner.png" alt="The Bleaches banner: pixel-art swordsmen with blue and red auras facing off under a full moon" width="100%">
+</p>
+
 # The Bleaches
 
 A 3D fighting game in the spirit of *Bleach: Rebirth of Souls*, built around one idea: **a bankai should change how the opponent is able to fight, not just make numbers bigger.** Tensa Zangetsu makes the opponent's tracking lag behind. Konjiki Ashisogi Jizo's poison takes away their legs, then their arms. Enma Korogi takes away their senses. Each bankai also hits as hard as its strength in the story, and in bankai you control its abilities yourself.
